@@ -21,6 +21,7 @@ export default function OnlineMatch({ onExit }: { onExit: () => void }) {
   const socketRef = useRef<WebSocket | null>(null);
   const inputs = useRef<(Pad | null)[]>([]);
   const snap = useRef<MatchSnap | null>(null);
+  const echoes = useRef<number[]>([]);
   const lastPad = useRef("");
   const lastSent = useRef(0);
   const [phase, setPhase] = useState<Phase>("pick");
@@ -79,6 +80,7 @@ export default function OnlineMatch({ onExit }: { onExit: () => void }) {
           you: player.seat === message.seat,
         }));
         inputs.current = next.map(() => ({ f: false, b: false, l: false, r: false, x: false }));
+        echoes.current = next.map(() => 0);
         setLineup(next);
         setSeat(message.seat);
         setHost(message.host);
@@ -89,6 +91,7 @@ export default function OnlineMatch({ onExit }: { onExit: () => void }) {
           humans: next.map(() => true),
           inputs,
           snap,
+          echoes,
           publish: (nextSnap) => {
             if (socket.readyState === WebSocket.OPEN) {
               socket.send(JSON.stringify({ type: "snap", snap: nextSnap }));
@@ -101,7 +104,7 @@ export default function OnlineMatch({ onExit }: { onExit: () => void }) {
             lastPad.current = packed;
             lastSent.current = now;
             if (socket.readyState === WebSocket.OPEN) {
-              socket.send(JSON.stringify({ type: "input", pad }));
+              socket.send(JSON.stringify({ type: "input", pad, echo: performance.now() }));
             }
           },
         });
@@ -110,6 +113,7 @@ export default function OnlineMatch({ onExit }: { onExit: () => void }) {
       }
       if (message.type === "input") {
         inputs.current[message.seat] = message.pad;
+        echoes.current[message.seat] = Number(message.echo) || 0;
         return;
       }
       if (message.type === "snap") {

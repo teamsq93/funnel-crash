@@ -194,7 +194,12 @@ server.on("connection", (socket) => {
     }
 
     if (message.type === "input" && room.phase === "match" && socket !== room.host) {
-      send(room.host, { type: "input", seat: self.seat, pad: message.pad });
+      send(room.host, {
+        type: "input",
+        seat: self.seat,
+        pad: message.pad,
+        echo: Number(message.echo) || 0,
+      });
       return;
     }
 

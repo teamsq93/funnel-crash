@@ -3,5 +3,6 @@ services:
     name: funnel-crash
     runtime: node
     plan: free
+    region: frankfurt
     buildCommand: npm install && npm run build
     startCommand: npm start

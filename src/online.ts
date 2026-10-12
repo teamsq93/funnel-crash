@@ -15,6 +15,8 @@ export type TruckSnap = {
   out: boolean;
   hp: number;
   armed: boolean;
+  yaw: number;
+  echo: number;
 };
 
 export type MatchSnap = {
@@ -44,6 +46,7 @@ export type OnlineLink = {
   humans: boolean[];
   inputs: { current: (Pad | null)[] };
   snap: { current: MatchSnap | null };
+  echoes: { current: number[] };
   publish: (snap: MatchSnap) => void;
   sendInput: (pad: Pad) => void;
 };

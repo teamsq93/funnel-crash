@@ -6,17 +6,6 @@ import { teamOf, teams, type MatchMode, type RosterPlayer, type WeaponId } from 
 
 type RoundOutcome = "win" | "loss" | "tie";
 
-type TruckPose = {
-  x: number;
-  y: number;
-  z: number;
-  qx: number;
-  qy: number;
-  qz: number;
-  qw: number;
-  visible: boolean;
-};
-
 const maxLife = 130;
 const drivePace = 0.7;
 
@@ -2016,13 +2005,14 @@ export default function ThreeArena({
     let guestRound = 1;
     let guestSummaryKey = "";
     let guestPicture: MatchSnap | null = null;
-    let guestPrev: TruckPose[] | null = null;
-    let guestNext: TruckPose[] | null = null;
-    let guestPrevAt = 0;
-    let guestNextAt = 0;
-    const poseFrom = new THREE.Vector3();
+    let predReady = false;
+    let predX = 0;
+    let predZ = 0;
+    let predYaw = 0;
+    let predSpeed = 0;
+    let predSlopeX = 0;
+    let predSlopeZ = 0;
     const poseTo = new THREE.Vector3();
-    const quatFrom = new THREE.Quaternion();
     const quatTo = new THREE.Quaternion();
     let shake = 0;
     const popups: { sprite: THREE.Sprite; life: number }[] = [];
@@ -2268,45 +2258,98 @@ export default function ThreeArena({
       if (link && !link.host) {
         const picture = link.snap.current;
         if (picture) {
+          const local = picture.trucks[link.seat];
+          const driving = Boolean(
+            local && local.visible && !local.out && !picture.summary && picture.banner === ""
+          );
           if (picture !== guestPicture) {
             guestPicture = picture;
-            guestPrev = guestNext;
-            guestPrevAt = guestNextAt;
-            guestNext = picture.trucks.map((shot) => ({
-              x: shot.x,
-              y: shot.y,
-              z: shot.z,
-              qx: shot.qx,
-              qy: shot.qy,
-              qz: shot.qz,
-              qw: shot.qw,
-              visible: shot.visible,
-            }));
-            guestNextAt = performance.now();
-            if (!guestPrev) {
-              guestPrev = guestNext;
-              guestPrevAt = guestNextAt;
+            if (!driving || !local) {
+              predReady = false;
+            } else if (!predReady) {
+              predX = local.x;
+              predZ = local.z;
+              predYaw = local.yaw ?? 0;
+              predSpeed = 0;
+              predSlopeX = 0;
+              predSlopeZ = 0;
+              predReady = true;
+            } else {
+              const rtt = local.echo
+                ? Math.min(Math.max(performance.now() - local.echo, 0), 700)
+                : 0;
+              const lead = rtt / 2000;
+              const aimYaw = local.yaw ?? predYaw;
+              const aheadX = local.x + Math.sin(aimYaw) * predSpeed * lead;
+              const aheadZ = local.z + Math.cos(aimYaw) * predSpeed * lead;
+              const err = Math.hypot(aheadX - predX, aheadZ - predZ);
+              if (err > 3.4) {
+                predX = aheadX;
+                predZ = aheadZ;
+                predYaw = aimYaw;
+                predSpeed *= 0.55;
+              } else {
+                const fix = err > 1.5 ? 0.5 : 0.18;
+                predX += (aheadX - predX) * fix;
+                predZ += (aheadZ - predZ) * fix;
+              }
             }
           }
-          const span = Math.min(Math.max(guestNextAt - guestPrevAt, 16), 120);
-          const blend = Math.min(Math.max((performance.now() - guestNextAt) / span, 0), 1);
+          if (predReady) {
+            const steer =
+              Math.abs(gamepadDrive.current.steer) > 0.05
+                ? gamepadDrive.current.steer
+                : (keys.left ? 1 : 0) - (keys.right ? 1 : 0);
+            if (keys.forward) predSpeed += 12 * drivePace * dt;
+            if (keys.backward) predSpeed -= 12 * drivePace * dt;
+            predSpeed *= Math.pow(0.993, dt * 60);
+            predSpeed = THREE.MathUtils.clamp(predSpeed, -6 * drivePace, 13 * drivePace);
+            const reverse = predSpeed < -0.35 ? -1 : 1;
+            const yawRate = THREE.MathUtils.clamp(
+              steer * reverse * (0.55 + Math.abs(predSpeed) * 0.16),
+              -2.2,
+              2.2
+            );
+            predYaw += yawRate * dt;
+            const radius = Math.hypot(predX, predZ) || 1;
+            if (radius < innerRadius + 0.05 || radius > outerRadius) {
+              predSlopeX *= Math.pow(0.9, dt * 60);
+              predSlopeZ *= Math.pow(0.9, dt * 60);
+            } else {
+              const grade =
+                (7.02 * 1.7 * Math.pow(radius / outerRadius, 0.7)) / outerRadius;
+              const accel = 3 * (grade / Math.hypot(1, grade));
+              predSlopeX -= (predX / radius) * accel * dt;
+              predSlopeZ -= (predZ / radius) * accel * dt;
+              const slide = Math.hypot(predSlopeX, predSlopeZ);
+              if (slide > 1.8) {
+                predSlopeX *= 1.8 / slide;
+                predSlopeZ *= 1.8 / slide;
+              }
+            }
+            predX += (Math.sin(predYaw) * predSpeed + predSlopeX) * dt;
+            predZ += (Math.cos(predYaw) * predSpeed + predSlopeZ) * dt;
+          }
+          const catchup = 1 - Math.exp(-22 * dt);
           for (let i = 0; i < picture.trucks.length; i++) {
             const truck = trucks[i];
             const shot = picture.trucks[i];
-            const from = guestPrev?.[i];
-            const to = guestNext?.[i];
-            if (!truck || !shot || !from || !to) continue;
-            if (from.visible !== to.visible) {
-              truck.position.set(to.x, to.y, to.z);
-              truck.quaternion.set(to.qx, to.qy, to.qz, to.qw);
+            if (!truck || !shot) continue;
+            if (i === link.seat && predReady) {
+              const stand = supportHeight(predX, predZ);
+              truck.position.set(predX, stand !== null ? stand + 0.12 : shot.y, predZ);
+              heading[i] = predYaw;
+              settleRoll(i, 0);
+            } else if (truck.position.distanceTo(poseTo.set(shot.x, shot.y, shot.z)) > 12) {
+              truck.position.copy(poseTo);
+              truck.quaternion.set(shot.qx, shot.qy, shot.qz, shot.qw);
             } else {
-              poseFrom.set(from.x, from.y, from.z);
-              poseTo.set(to.x, to.y, to.z);
-              truck.position.lerpVectors(poseFrom, poseTo, blend);
-              quatFrom.set(from.qx, from.qy, from.qz, from.qw);
-              quatTo.set(to.qx, to.qy, to.qz, to.qw);
-              if (quatFrom.dot(quatTo) < 0) quatTo.set(-to.qx, -to.qy, -to.qz, -to.qw);
-              truck.quaternion.copy(quatFrom).slerp(quatTo, blend);
+              truck.position.lerp(poseTo, catchup);
+              quatTo.set(shot.qx, shot.qy, shot.qz, shot.qw);
+              if (truck.quaternion.dot(quatTo) < 0) {
+                quatTo.set(-shot.qx, -shot.qy, -shot.qz, -shot.qw);
+              }
+              truck.quaternion.slerp(quatTo, catchup);
             }
             truck.visible = shot.visible;
             weaponOn[i] = Boolean(shot.armed);
@@ -3037,7 +3080,7 @@ export default function ThreeArena({
       }
 
       const publisher = onlineRef.current;
-      if (publisher?.host && performance.now() - lastSnapAt > 32) {
+      if (publisher?.host && performance.now() - lastSnapAt > 20) {
         lastSnapAt = performance.now();
         publisher.publish({
           timeLeft: Math.max(0, 120 - matchElapsed),
@@ -3058,6 +3101,8 @@ export default function ThreeArena({
             out: falling[index] || eliminated.current.has(index),
             hp: health[index],
             armed: weaponOn[index],
+            yaw: heading[index],
+            echo: publisher.echoes?.current[index] ?? 0,
           })),
         });
       }
