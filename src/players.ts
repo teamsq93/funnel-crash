@@ -17,6 +17,8 @@ export const weapons: Record<WeaponId, { name: string; line: string }> = {
   spike: { name: "Spjut", line: "Håll in X så sticker spjutet ut och stöter rakt." },
 };
 
+export const weaponIds = Object.keys(weapons) as WeaponId[];
+
 export type MatchMode = "ffa" | "teams";
 
 export const maxPlayers = 6;

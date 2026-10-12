@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
-import type { OnlineLink } from "./online";
+import type { MatchSnap, OnlineLink } from "./online";
 import { teamOf, teams, type MatchMode, type RosterPlayer, type WeaponId } from "./players";
 
 type RoundOutcome = "win" | "loss" | "tie";
@@ -12,17 +12,22 @@ type RoundSummary = {
   outcome: RoundOutcome;
   standings: { name: string; color: string; teamColor: string | null; points: number }[];
   fellOut: { name: string; color: string; teamColor: string | null; how: "hålet" | "kanten" | "livet" }[];
+  round: number;
+  rounds: number;
+  more: boolean;
 };
 
 export default function ThreeArena({
   onExit,
   mode,
   players,
+  rounds = 1,
   online = null,
 }: {
   onExit: () => void;
   mode: MatchMode;
   players: RosterPlayer[];
+  rounds?: number;
   online?: OnlineLink | null;
 }) {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -30,6 +35,7 @@ export default function ThreeArena({
   const [opponentsLeft, setOpponentsLeft] = useState(players.length - 1);
   const [playerOut, setPlayerOut] = useState(false);
   const [roundSummary, setRoundSummary] = useState<RoundSummary | null>(null);
+  const [roundMark, setRoundMark] = useState(1);
   const [countdown, setCountdown] = useState("3");
   const [timeLeft] = useState(120);
   const eliminated = useRef(new Set<number>());
@@ -41,6 +47,7 @@ export default function ThreeArena({
   const rivalLabelRefs = useRef<Array<HTMLDivElement | null>>([]);
   const rivalFillRefs = useRef<Array<HTMLDivElement | null>>([]);
   const onlineRef = useRef(online);
+  const advanceRound = useRef<(() => void) | null>(null);
   const keyDown = useRef({ forward: false, backward: false, left: false, right: false });
   const touchDown = useRef({ forward: false, backward: false, left: false, right: false });
   const weaponKey = useRef(false);
@@ -664,10 +671,10 @@ export default function ThreeArena({
 
     const standTextures: THREE.Texture[] = [];
 
-    // Four rows of stands in the gaps between the ramps.
+    // Three rows of stands in the gaps between the ramps.
     // The crowd is one flat repeating strip per row, not a card per person.
     {
-      const rowCount = 4;
+      const rowCount = 3;
       const tread = 1.28;
       const rise = 0.74;
       const standInner = outerRadius + 1.15;
@@ -844,6 +851,28 @@ export default function ThreeArena({
 
     // Simple 3D truck model
     const carWidthScale = 1.1;
+
+    const flameCanvas = document.createElement("canvas");
+    flameCanvas.width = 64;
+    flameCanvas.height = 64;
+    const flamePaint = flameCanvas.getContext("2d");
+    if (flamePaint) {
+      const glow = flamePaint.createRadialGradient(32, 42, 2, 32, 34, 30);
+      glow.addColorStop(0, "rgba(255, 252, 230, 0.95)");
+      glow.addColorStop(0.28, "rgba(255, 186, 48, 0.9)");
+      glow.addColorStop(0.62, "rgba(230, 52, 8, 0.45)");
+      glow.addColorStop(1, "rgba(40, 0, 0, 0)");
+      flamePaint.fillStyle = glow;
+      flamePaint.fillRect(0, 0, 64, 64);
+    }
+    const flameMap = new THREE.CanvasTexture(flameCanvas);
+    flameMap.colorSpace = THREE.SRGBColorSpace;
+    const flameMaterial = new THREE.SpriteMaterial({
+      map: flameMap,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
 
     function createTruck(
       ownColor: number,
@@ -1072,6 +1101,27 @@ export default function ThreeArena({
         }
       }
 
+      const blaze = new THREE.Group();
+      blaze.name = "blaze";
+      blaze.visible = false;
+      for (const [x, y, z] of [
+        [0, 0.95, 0.05],
+        [-0.34, 1.2, -0.25],
+        [0.36, 1.1, 0.28],
+        [0, 1.55, -0.4],
+        [0.08, 0.78, 0.72],
+      ] as const) {
+        const flame = new THREE.Sprite(flameMaterial.clone());
+        flame.position.set(x, y, z);
+        flame.userData.baseY = y;
+        flame.scale.set(0.9, 1.3, 1);
+        blaze.add(flame);
+      }
+      const fireLight = new THREE.PointLight(0xff6a1a, 0, 7);
+      fireLight.position.set(0, 1.15, 0);
+      blaze.add(fireLight);
+      truck.add(blaze);
+
       truck.position.set(
         x,
         surfaceHeight(Math.hypot(x, z)) + 0.12,
@@ -1276,6 +1326,7 @@ export default function ThreeArena({
     const pinnedTo = trucks.map(() => -1);
     const pinLeft = trucks.map(() => 0);
     const falling = trucks.map(() => false);
+    const burnLeft = trucks.map(() => 0);
     const fallToHole = trucks.map(() => false);
     const deathHow = trucks.map(() => "kanten" as "hålet" | "kanten" | "livet");
     const outOrder: number[] = [];
@@ -1522,10 +1573,43 @@ export default function ThreeArena({
       paintRivals(health);
     }
 
+    function poseBlaze(truck: THREE.Object3D, burning: boolean) {
+      const blaze = truck.getObjectByName("blaze");
+      if (!blaze) return;
+      blaze.visible = burning;
+      if (!burning) return;
+      const time = performance.now() * 0.012;
+      let flameIndex = 0;
+      for (const child of blaze.children) {
+        if (child instanceof THREE.Sprite) {
+          const flicker = 0.7 + Math.sin(time * (2.2 + flameIndex * 0.37) + flameIndex * 1.7) * 0.3;
+          const width = (0.82 + (flameIndex % 3) * 0.2) * flicker;
+          child.scale.set(width, width * 1.5, 1);
+          child.position.y = (child.userData.baseY as number) + Math.sin(time * 1.5 + flameIndex) * 0.14;
+          const material = child.material;
+          material.opacity = 0.45 + flicker * 0.5;
+          flameIndex += 1;
+        } else if (child instanceof THREE.PointLight) {
+          child.intensity = 12 + Math.sin(time * 3.4) * 7;
+        }
+      }
+    }
+
     function settleRoll(index: number, riseStrength: number) {
       const truck = trucks[index];
 
       if (falling[index]) {
+        if (deathHow[index] === "livet") {
+          burnLeft[index] -= dt;
+          if (burnLeft[index] > 0) {
+            poseBlaze(truck, true);
+            return;
+          }
+          poseBlaze(truck, false);
+          truck.visible = false;
+          return;
+        }
+
         fallSpeed[index] += 18 * dt;
         truck.position.y -= fallSpeed[index] * dt;
 
@@ -1737,6 +1821,29 @@ export default function ThreeArena({
       if (connected) chipLife(victim, attacker);
     }
 
+    function bodyBox(index: number) {
+      const weapon = players[index].weapon;
+      if (weapon === "spinner") return { length: 1.25, width: 1.12 * carWidthScale };
+      if (weapon === "axe") return { length: 1.9, width: 0.78 * carWidthScale };
+      if (weapon === "spike") return { length: 1.9, width: 0.7 * carWidthScale };
+      if (weapon === "saw") return { length: 1.65, width: 0.95 * carWidthScale };
+      if (weapon === "wedge" || weapon === "plow") return { length: 1.75, width: 0.82 * carWidthScale };
+      return { length: 1.2, width: 0.62 * carWidthScale };
+    }
+
+    function outwardExtent(index: number, nx: number, nz: number) {
+      const yaw = heading[index];
+      const forwardX = Math.sin(yaw);
+      const forwardZ = Math.cos(yaw);
+      const rightX = Math.cos(yaw);
+      const rightZ = -Math.sin(yaw);
+      const box = bodyBox(index);
+      return (
+        box.length * Math.abs(forwardX * nx + forwardZ * nz) +
+        box.width * Math.abs(rightX * nx + rightZ * nz)
+      );
+    }
+
     // Oriented box in the funnel plane, so a hit on the flank is different
     // from a hit on the nose.
     function obbContact(i: number, j: number) {
@@ -1748,17 +1855,8 @@ export default function ThreeArena({
       const aRight = { x: Math.cos(aYaw), z: -Math.sin(aYaw) };
       const bForward = { x: Math.sin(bYaw), z: Math.cos(bYaw) };
       const bRight = { x: Math.cos(bYaw), z: -Math.sin(bYaw) };
-      const reachOf = (index: number) => {
-        const weapon = players[index].weapon;
-        if (weapon === "spinner") return { length: 1.25, width: 1.12 * carWidthScale };
-        if (weapon === "axe") return { length: 1.9, width: 0.78 * carWidthScale };
-        if (weapon === "spike") return { length: 1.9, width: 0.7 * carWidthScale };
-        if (weapon === "saw") return { length: 1.65, width: 0.95 * carWidthScale };
-        if (weapon === "wedge" || weapon === "plow") return { length: 1.75, width: 0.82 * carWidthScale };
-        return { length: 1.2, width: 0.62 * carWidthScale };
-      };
-      const aReachBox = reachOf(i);
-      const bReachBox = reachOf(j);
+      const aReachBox = bodyBox(i);
+      const bReachBox = bodyBox(j);
       const deltaX = b.position.x - a.position.x;
       const deltaZ = b.position.z - a.position.z;
       const axes = [aForward, aRight, bForward, bRight];
@@ -1843,6 +1941,11 @@ export default function ThreeArena({
     const rivalPoints = trucks.map(() => 0);
     const lastHitBy = trucks.map(() => -1);
     const lastHitAt = trucks.map(() => -10);
+    const roundTotal = Math.min(5, Math.max(1, Math.round(rounds) || 1));
+    let roundNow = 1;
+    let activeSummary: MatchSnap["summary"] = null;
+    let guestRound = 1;
+    let guestSummaryKey = "";
     let shake = 0;
     const popups: { sprite: THREE.Sprite; life: number }[] = [];
     const audio = new AudioContext();
@@ -1944,38 +2047,135 @@ export default function ThreeArena({
 
       for (const lane of laneAngles) {
         const { along, side } = laneLocal(x, z, lane);
-        if (along < joinRadius + 0.15 || along > rampTopRadius - 0.05) continue;
-        const limit = padHalfWidth - 0.72;
-        const reach = padHalfWidth + 1.15;
-        if (side > limit && side < reach) {
-          const next = laneWorld(along, limit, lane);
-          x = next.x;
-          z = next.z;
-          stopOutward(index, -Math.sin(lane), Math.cos(lane));
-        } else if (side < -limit && side > -reach) {
-          const next = laneWorld(along, -limit, lane);
-          x = next.x;
-          z = next.z;
-          stopOutward(index, Math.sin(lane), -Math.cos(lane));
-        }
+        if (along < joinRadius - 0.15 || along > padOuter + 0.2) continue;
+        const outward = side >= 0 ? 1 : -1;
+        const nx = outward * -Math.sin(lane);
+        const nz = outward * Math.cos(lane);
+        const extent = outwardExtent(index, nx, nz);
+        const wallInner = (along >= rampTopRadius ? padHalfWidth - 0.21 : padHalfWidth - 0.12) - extent;
+        const past = Math.abs(side) - wallInner;
+        if (past <= 0 || Math.abs(side) > padHalfWidth + extent + 0.45) continue;
+        const next = laneWorld(along, outward * wallInner, lane);
+        x = next.x;
+        z = next.z;
+        stopOutward(index, nx, nz);
       }
 
       const radius = Math.hypot(x, z);
-      const angle = Math.atan2(z, x);
-      const rampGap = laneAngles.some((lane) => {
-        const delta = Math.atan2(Math.sin(angle - lane), Math.cos(angle - lane));
-        return Math.abs(delta) < 0.36;
-      });
-      const maxRim = outerRadius - 1.05;
-      if (!rampGap && radius > maxRim && radius < outerRadius + 2.2) {
-        x *= maxRim / radius;
-        z *= maxRim / radius;
-        stopOutward(index, x / maxRim, z / maxRim);
+      if (radius > 0.05) {
+        const angle = Math.atan2(z, x);
+        const rampGap = laneAngles.some((lane) => {
+          const delta = Math.atan2(Math.sin(angle - lane), Math.cos(angle - lane));
+          return Math.abs(delta) < 0.34;
+        });
+        const nx = x / radius;
+        const nz = z / radius;
+        const maxRim = Math.max(outerRadius - 0.2 - outwardExtent(index, nx, nz), innerRadius + 1);
+        if (!rampGap && radius > maxRim && radius < outerRadius + 2.4) {
+          x *= maxRim / radius;
+          z *= maxRim / radius;
+          stopOutward(index, nx, nz);
+        }
       }
 
       truck.position.x = x;
       truck.position.z = z;
     }
+
+    function clearOverlap() {
+      for (let i = 0; i < trucks.length; i++) {
+        if (falling[i] || (i > 0 && eliminated.current.has(i))) continue;
+        for (let j = i + 1; j < trucks.length; j++) {
+          if (falling[j] || eliminated.current.has(j)) continue;
+          const hit = obbContact(i, j);
+          if (!hit || hit.overlap < 0.02) continue;
+          const shift = hit.overlap * 0.5;
+          trucks[i].position.x -= hit.nx * shift;
+          trucks[i].position.z -= hit.nz * shift;
+          trucks[j].position.x += hit.nx * shift;
+          trucks[j].position.z += hit.nz * shift;
+        }
+      }
+    }
+
+    function resetArena() {
+      activeSummary = null;
+      eliminated.current.clear();
+      outOrder.length = 0;
+      contactPairs.clear();
+      pendingPoints.length = 0;
+      countdownElapsed = 0;
+      matchElapsed = 0;
+      countdownLabel = "3";
+      shownTime = 120;
+      raceStarted.current = false;
+      matchOver.current = false;
+      playerSpeed = 0;
+      playerKnockX = 0;
+      playerKnockZ = 0;
+      steerSmooth = 0;
+      playerAngle = spawns[0].yaw;
+      shake = 0;
+      for (let i = 0; i < trucks.length; i++) {
+        const truck = trucks[i];
+        truck.visible = true;
+        truck.position.set(spawns[i].x, spawns[i].y, spawns[i].z);
+        heading[i] = spawns[i].yaw;
+        remoteSpeed[i] = 0;
+        remoteSteer[i] = 0;
+        knockX[i] = 0;
+        knockZ[i] = 0;
+        driveX[i] = 0;
+        driveZ[i] = 0;
+        roll[i] = 0;
+        rollVel[i] = 0;
+        yawRate[i] = 0;
+        leanTarget[i] = 0;
+        tipped[i] = false;
+        downFor[i] = 0;
+        hop[i] = 0;
+        weaponAnim[i] = 0;
+        weaponOn[i] = false;
+        health[i] = maxLife;
+        pinnedTo[i] = -1;
+        pinLeft[i] = 0;
+        falling[i] = false;
+        burnLeft[i] = 0;
+        fallToHole[i] = false;
+        deathHow[i] = "kanten";
+        fallSpeed[i] = 0;
+        slopeX[i] = 0;
+        slopeZ[i] = 0;
+        lastHitBy[i] = -1;
+        lastHitAt[i] = -10;
+        const wedge = truck.getObjectByName("wedge");
+        if (wedge) wedge.rotation.x = 0.5;
+        const plow = truck.getObjectByName("plow");
+        if (plow) plow.rotation.x = 0.28;
+        const spike = truck.getObjectByName("spike");
+        if (spike) spike.position.z = 0;
+        const axe = truck.getObjectByName("axe");
+        if (axe) axe.rotation.x = -0.55;
+        const blaze = truck.getObjectByName("blaze");
+        if (blaze) blaze.visible = false;
+      }
+      if (timeLabelRef.current) timeLabelRef.current.textContent = "Tid: 2:00";
+      if (pinLabelRef.current) pinLabelRef.current.textContent = "";
+      paintLife(maxLife);
+      paintRivals(health);
+      refreshHole(innerRadius);
+    }
+
+    advanceRound.current = () => {
+      if (!matchOver.current || roundNow >= roundTotal) return;
+      roundNow += 1;
+      resetArena();
+      setRoundMark(roundNow);
+      setRoundSummary(null);
+      setPlayerOut(false);
+      setOpponentsLeft(trucks.length - 1);
+      setCountdown("3");
+    };
 
     function animate(time = 0) {
       if (!running) return;
@@ -1999,6 +2199,7 @@ export default function ThreeArena({
             truck.visible = shot.visible;
             weaponOn[i] = Boolean(shot.armed);
             poseWeapon(i);
+            poseBlaze(truck, shot.hp <= 0 && shot.visible);
           }
           const mine = picture.trucks[link.seat];
           if (mine && scoreLabelRef.current) {
@@ -2013,6 +2214,37 @@ export default function ThreeArena({
           if (picture.banner !== countdownLabel) {
             countdownLabel = picture.banner;
             setCountdown(picture.banner);
+          }
+          const shownRound = picture.round ?? 1;
+          if (shownRound !== guestRound) {
+            guestRound = shownRound;
+            setRoundMark(shownRound);
+          }
+          if (picture.summary) {
+            const summaryKey = `${shownRound}:${picture.summary.more}:${picture.summary.standings.map((row) => row.points).join(",")}`;
+            if (summaryKey !== guestSummaryKey) {
+              guestSummaryKey = summaryKey;
+              const mine = picture.trucks[link.seat]?.score ?? 0;
+              let bestOther = 0;
+              picture.trucks.forEach((shot, index) => {
+                if (index !== link.seat) bestOther = Math.max(bestOther, shot.score);
+              });
+              const outcome: RoundOutcome =
+                mine > bestOther ? "win" : mine < bestOther ? "loss" : "tie";
+              setPlayerOut(false);
+              setRoundSummary({
+                outcome,
+                standings: picture.summary.standings.map((row) => ({ ...row, teamColor: null })),
+                fellOut: picture.summary.fellOut.map((row) => ({ ...row, teamColor: null })),
+                round: shownRound,
+                rounds: picture.rounds ?? roundTotal,
+                more: picture.summary.more,
+              });
+            }
+          } else if (guestSummaryKey) {
+            guestSummaryKey = "";
+            setRoundSummary(null);
+            setPlayerOut(false);
           }
           if (picture.banner === "") raceStarted.current = true;
           matchElapsed = Math.max(0, 120 - picture.timeLeft);
@@ -2068,7 +2300,13 @@ export default function ThreeArena({
         }));
 
         setScore(playerPoints);
-        setRoundSummary({ outcome, standings, fellOut });
+        const more = roundNow < roundTotal;
+        activeSummary = {
+          standings: standings.map(({ name, color, points }) => ({ name, color, points })),
+          fellOut: fellOut.map(({ name, color, how }) => ({ name, color, how })),
+          more,
+        };
+        setRoundSummary({ outcome, standings, fellOut, round: roundNow, rounds: roundTotal, more });
       }
 
       function finishByScore() {
@@ -2116,8 +2354,10 @@ export default function ThreeArena({
 
       function wreckFromHealth(index: number) {
         if (health[index] > 0 || falling[index]) return;
+        burnLeft[index] = 1.5;
         knockOut(index, false);
         deathHow[index] = "livet";
+        poseBlaze(trucks[index], true);
       }
 
       if (!matchOver.current && !raceStarted.current) {
@@ -2348,7 +2588,7 @@ export default function ThreeArena({
       let focusY = player.position.y;
       let focusZ = player.position.z;
 
-      if (falling[0]) {
+      if (falling[0] && !(deathHow[0] === "livet" && burnLeft[0] > 0)) {
         let watching = 0;
         let sumX = 0;
         let sumY = 0;
@@ -2471,7 +2711,7 @@ export default function ThreeArena({
 
           const advantage = aPower.power - bPower.power;
           const aShare = advantage >= 0 ? 0.22 : 0.78;
-          const correct = Math.min(overlap * 0.45, 0.16);
+          const correct = overlap;
           if (correct > 0.012) {
             a.position.x -= nx * correct * aShare;
             a.position.z -= nz * correct * aShare;
@@ -2618,9 +2858,20 @@ export default function ThreeArena({
       }
       pendingPoints.length = 0;
 
+      for (let pass = 0; pass < 2; pass++) {
+        for (let i = 0; i < trucks.length; i++) {
+          if (falling[i] || (i > 0 && eliminated.current.has(i))) continue;
+          containTruck(i);
+        }
+        clearOverlap();
+      }
       for (let i = 0; i < trucks.length; i++) {
         if (falling[i] || (i > 0 && eliminated.current.has(i))) continue;
         containTruck(i);
+      }
+
+      for (let i = 0; i < trucks.length; i++) {
+        if (falling[i] || (i > 0 && eliminated.current.has(i))) continue;
         const holeDistance = Math.hypot(trucks[i].position.x, trucks[i].position.z);
         if (holeDistance < holeRadiusNow()) {
           knockOut(i, true, true);
@@ -2679,6 +2930,9 @@ export default function ThreeArena({
         publisher.publish({
           timeLeft: Math.max(0, 120 - matchElapsed),
           banner: countdownLabel,
+          round: roundNow,
+          rounds: roundTotal,
+          summary: activeSummary,
           trucks: trucks.map((truck, index) => ({
             x: truck.position.x,
             y: truck.position.y,
@@ -2707,6 +2961,7 @@ export default function ThreeArena({
 
     return () => {
       running = false;
+      advanceRound.current = null;
       cancelAnimationFrame(animationFrame);
       audioRef.current = null;
       for (const texture of standTextures) texture.dispose();
@@ -2754,6 +3009,9 @@ export default function ThreeArena({
     if (down && audioRef.current?.state === "suspended") void audioRef.current.resume();
   }
 
+  const roundTotal = Math.min(5, Math.max(1, Math.round(rounds) || 1));
+  const canAdvance = !online || online.host;
+
   return (
     <div
       style={{
@@ -2786,6 +3044,11 @@ export default function ThreeArena({
         <div style={{ fontSize: 14, letterSpacing: 1, color: "#cbd5e1" }}>
           FUNNEL CRASH
         </div>
+        {roundTotal > 1 && (
+          <div style={{ fontSize: 16, marginTop: 4 }}>
+            Runda {roundMark}/{roundTotal}
+          </div>
+        )}
         <div ref={scoreLabelRef} style={{ fontSize: "clamp(22px, 6vw, 28px)", fontWeight: 700, color: "#facc15" }}>
           Poäng: {score}
         </div>
@@ -2988,7 +3251,11 @@ export default function ThreeArena({
               FUNNEL CRASH
             </div>
             <div style={{ fontSize: 32, fontWeight: 800, marginTop: 4 }}>
-              Rundan är klar
+              {roundSummary.rounds > 1
+                ? roundSummary.more
+                  ? `Runda ${roundSummary.round} av ${roundSummary.rounds}`
+                  : "Matchen är klar"
+                : "Rundan är klar"}
             </div>
             <div
               style={{
@@ -3003,11 +3270,17 @@ export default function ThreeArena({
                       : "#f87171",
               }}
             >
-              {roundSummary.outcome === "win"
-                ? "Du vann"
-                : roundSummary.outcome === "loss"
-                  ? "Du förlorade"
-                  : "Oavgjort"}
+              {roundSummary.more
+                ? roundSummary.outcome === "win"
+                  ? "Du leder"
+                  : roundSummary.outcome === "loss"
+                    ? "Du är efter"
+                    : "Lika"
+                : roundSummary.outcome === "win"
+                  ? "Du vann"
+                  : roundSummary.outcome === "loss"
+                    ? "Du förlorade"
+                    : "Oavgjort"}
             </div>
 
             <div
@@ -3019,7 +3292,7 @@ export default function ThreeArena({
                 fontWeight: 700,
               }}
             >
-              POÄNG
+              {roundSummary.rounds > 1 ? "TOTALT" : "POÄNG"}
             </div>
             <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 8 }}>
               {roundSummary.standings.map((row, index) => (
@@ -3125,18 +3398,42 @@ export default function ThreeArena({
               )}
             </div>
 
+            {roundSummary.more && canAdvance && (
+              <button
+                onClick={() => advanceRound.current?.()}
+                style={{
+                  marginTop: 18,
+                  width: "100%",
+                  padding: "12px 22px",
+                  fontSize: 18,
+                  fontWeight: 800,
+                  border: "none",
+                  borderRadius: 10,
+                  background: "#facc15",
+                  color: "#111820",
+                  cursor: "pointer",
+                }}
+              >
+                Nästa runda
+              </button>
+            )}
+            {roundSummary.more && !canAdvance && (
+              <div style={{ marginTop: 18, color: "#cbd5e1", fontWeight: 700 }}>
+                Väntar på nästa runda
+              </div>
+            )}
             <button
               onClick={restart}
               style={{
-                marginTop: 18,
+                marginTop: 12,
                 width: "100%",
                 padding: "12px 22px",
                 fontSize: 18,
                 fontWeight: 800,
                 border: "none",
                 borderRadius: 10,
-                background: "#facc15",
-                color: "#111820",
+                background: roundSummary.more ? "transparent" : "#facc15",
+                color: roundSummary.more ? "#94a3b8" : "#111820",
                 cursor: "pointer",
               }}
             >

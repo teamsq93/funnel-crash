@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import ThreeArena from "./ThreeArena";
 import type { LobbySeat, MatchSnap, OnlineLink, Pad } from "./online";
-import { weapons, type RosterPlayer } from "./players";
+import { weaponIds, weapons, type RosterPlayer, type WeaponId } from "./players";
 
 type Phase = "pick" | "lobby" | "play";
 
@@ -28,8 +28,10 @@ export default function OnlineMatch({ onExit }: { onExit: () => void }) {
   const [code, setCode] = useState("");
   const [roomCode, setRoomCode] = useState("");
   const [host, setHost] = useState(false);
+  const [seat, setSeat] = useState(0);
   const [players, setPlayers] = useState<LobbySeat[]>([]);
   const [lineup, setLineup] = useState<RosterPlayer[]>([]);
+  const [rounds, setRounds] = useState(1);
   const [error, setError] = useState("");
   const [link, setLink] = useState<OnlineLink | null>(null);
 
@@ -63,7 +65,9 @@ export default function OnlineMatch({ onExit }: { onExit: () => void }) {
         setPhase("lobby");
         setRoomCode(message.code);
         setHost(message.host);
+        setSeat(message.seat);
         setPlayers(message.players);
+        setRounds(message.rounds ?? 1);
         return;
       }
       if (message.type === "begin") {
@@ -76,7 +80,9 @@ export default function OnlineMatch({ onExit }: { onExit: () => void }) {
         }));
         inputs.current = next.map(() => ({ f: false, b: false, l: false, r: false, x: false }));
         setLineup(next);
+        setSeat(message.seat);
         setHost(message.host);
+        setRounds(message.rounds ?? 1);
         setLink({
           seat: message.seat,
           host: message.host,
@@ -127,6 +133,7 @@ export default function OnlineMatch({ onExit }: { onExit: () => void }) {
         key={lineup.map((player) => player.id).join("-")}
         mode="ffa"
         players={lineup}
+        rounds={rounds}
         online={link}
         onExit={() => {
           socketRef.current?.close();
@@ -189,25 +196,87 @@ export default function OnlineMatch({ onExit }: { onExit: () => void }) {
         {phase === "lobby" && (
           <>
             <div style={{ marginTop: 18, fontSize: 28, fontWeight: 800, letterSpacing: 4 }}>{roomCode}</div>
+            <div style={{ marginTop: 16 }}>
+              <div style={{ fontSize: 13, letterSpacing: 1, color: "#94a3b8", fontWeight: 700 }}>
+                RUNDOR
+              </div>
+              {host ? (
+                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                  {[1, 2, 3, 4, 5].map((count) => {
+                    const selected = rounds === count;
+                    return (
+                      <button
+                        key={count}
+                        aria-label={`${count} ${count === 1 ? "runda" : "rundor"}`}
+                        aria-pressed={selected}
+                        onClick={() => send({ type: "rounds", rounds: count })}
+                        style={{
+                          flex: 1,
+                          padding: "12px 0",
+                          fontSize: 16,
+                          fontWeight: 800,
+                          borderRadius: 10,
+                          border: selected ? "1px solid #facc15" : "1px solid #2a3846",
+                          background: selected ? "#facc15" : "#18222b",
+                          color: selected ? "#111820" : "#e2e8f0",
+                          cursor: "pointer",
+                        }}
+                      >
+                        {count}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div style={{ marginTop: 6, fontSize: 18, fontWeight: 800 }}>{rounds}</div>
+              )}
+            </div>
             <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 8 }}>
               {players.map((player) => (
                 <div
                   key={player.id}
                   style={{
-                    display: "flex",
-                    justifyContent: "space-between",
                     padding: "12px 14px",
                     borderRadius: 10,
-                    background: "#18222b",
+                    background: player.seat === seat ? "#1c2833" : "#18222b",
+                    border: player.seat === seat ? "1px solid #facc15" : "1px solid transparent",
                   }}
                 >
-                  <span>
-                    {player.name}
-                    <span style={{ color: "#94a3b8" }}> · {weapons[rosterWeapon(player.seat)].name}</span>
-                  </span>
-                  <span style={{ color: player.ready ? "#86efac" : "#94a3b8" }}>
-                    {player.ready ? "Klar" : "Väntar"}
-                  </span>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                    <span style={{ fontWeight: 700 }}>{player.name}</span>
+                    <span style={{ color: player.ready ? "#86efac" : "#94a3b8" }}>
+                      {player.ready ? "Klar" : "Väntar"}
+                    </span>
+                  </div>
+                  {player.seat === seat ? (
+                    <select
+                      aria-label="Ditt vapen"
+                      value={player.weapon}
+                      disabled={player.ready}
+                      onChange={(event) => send({ type: "weapon", weapon: event.target.value as WeaponId })}
+                      style={{
+                        marginTop: 8,
+                        width: "100%",
+                        padding: "8px 10px",
+                        fontSize: 16,
+                        fontWeight: 700,
+                        borderRadius: 8,
+                        border: "1px solid #2a3846",
+                        background: "#111820",
+                        color: "#f8fafc",
+                      }}
+                    >
+                      {weaponIds.map((id) => (
+                        <option key={id} value={id}>
+                          {weapons[id].name}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <div style={{ marginTop: 4, color: "#94a3b8", fontWeight: 700 }}>
+                      {weapons[player.weapon].name}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -245,10 +314,6 @@ export default function OnlineMatch({ onExit }: { onExit: () => void }) {
       </div>
     </div>
   );
-}
-
-function rosterWeapon(seat: number) {
-  return (["wedge", "axe", "spinner", "saw", "plow", "spike"] as const)[seat] ?? "wedge";
 }
 
 const fieldStyle = {

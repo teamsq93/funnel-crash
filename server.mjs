@@ -13,7 +13,7 @@ const roster = [
   { id: "sam", color: "#2ec8e6", weapon: "spike" },
 ];
 
-const rooms = new Map();
+const weaponIds = new Set(["wedge", "axe", "spinner", "saw", "plow", "spike"]);
 
 function makeCode() {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -27,15 +27,19 @@ function send(socket, message) {
 }
 
 function lobbyMessage(room, socket) {
+  const mine = room.players.find((player) => player.socket === socket);
   return {
     type: "lobby",
     code: room.code,
     host: socket === room.host,
+    seat: mine?.seat ?? 0,
+    rounds: room.rounds,
     players: room.players.map((player) => ({
       id: player.id,
       name: player.name,
       seat: player.seat,
       ready: player.ready,
+      weapon: player.weapon,
     })),
   };
 }
@@ -107,7 +111,7 @@ server.on("connection", (socket) => {
       if (message.type === "create") {
         let code = makeCode();
         while (rooms.has(code)) code = makeCode();
-        room = { code, host: socket, players: [], phase: "lobby" };
+        room = { code, host: socket, players: [], phase: "lobby", rounds: 1 };
         rooms.set(code, room);
       } else {
         room = rooms.get(String(message.code ?? "").toUpperCase());
@@ -138,6 +142,23 @@ server.on("connection", (socket) => {
 
     if (!room || !self) return;
 
+    if (message.type === "weapon" && room.phase === "lobby" && !self.ready) {
+      if (weaponIds.has(message.weapon)) {
+        self.weapon = message.weapon;
+        pushLobby(room);
+      }
+      return;
+    }
+
+    if (message.type === "rounds" && room.phase === "lobby" && socket === room.host) {
+      const count = Math.round(Number(message.rounds));
+      if (count >= 1 && count <= 5) {
+        room.rounds = count;
+        pushLobby(room);
+      }
+      return;
+    }
+
     if (message.type === "ready" && room.phase === "lobby") {
       self.ready = !self.ready;
       pushLobby(room);
@@ -158,7 +179,13 @@ server.on("connection", (socket) => {
         seat: player.seat,
       }));
       for (const player of room.players) {
-        send(player.socket, { type: "begin", players, seat: player.seat, host: player.socket === room.host });
+        send(player.socket, {
+          type: "begin",
+          players,
+          seat: player.seat,
+          host: player.socket === room.host,
+          rounds: room.rounds,
+        });
       }
       return;
     }

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { maxPlayers, roster, teamOf, teams, weapons, type MatchMode, type RosterPlayer } from "./players";
+import { maxPlayers, roster, teamOf, teams, weaponIds, weapons, type MatchMode, type RosterPlayer, type WeaponId } from "./players";
 
 type LobbyPlayer = RosterPlayer & { ready: boolean };
 
@@ -13,19 +13,22 @@ export default function Lobby({
   onOnline,
 }: {
   lineup: RosterPlayer[];
-  onStart: (mode: MatchMode, players: RosterPlayer[]) => void;
+  onStart: (mode: MatchMode, players: RosterPlayer[], rounds: number) => void;
   onOnline: () => void;
 }) {
   const [players, setPlayers] = useState(() => lineup.map(asLobby));
   const [mode, setMode] = useState<MatchMode>("ffa");
+  const [rounds, setRounds] = useState(1);
   const [starting, setStarting] = useState(false);
   const onStartRef = useRef(onStart);
   const modeRef = useRef(mode);
+  const roundsRef = useRef(rounds);
   const playersRef = useRef(players);
   const extraTimers = useRef<number[]>([]);
   const addLock = useRef(false);
   onStartRef.current = onStart;
   modeRef.current = mode;
+  roundsRef.current = rounds;
   playersRef.current = players;
 
   useEffect(() => {
@@ -93,12 +96,20 @@ export default function Lobby({
             color,
             you,
             weapon,
-          }))
+          })),
+          roundsRef.current
         ),
       900
     );
     return () => window.clearTimeout(timer);
   }, [allReady]);
+
+  function setWeapon(id: string, weapon: WeaponId) {
+    if (youReady || starting) return;
+    setPlayers((current) =>
+      current.map((player) => (player.id === id ? { ...player, weapon } : player))
+    );
+  }
 
   function readyUp() {
     setPlayers((current) =>
@@ -166,6 +177,38 @@ export default function Lobby({
               </button>
             );
           })}
+        </div>
+        <div style={{ marginTop: 16 }}>
+          <div style={{ fontSize: 13, letterSpacing: 1, color: "#94a3b8", fontWeight: 700 }}>
+            RUNDOR
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+            {[1, 2, 3, 4, 5].map((count) => {
+              const selected = rounds === count;
+              return (
+                <button
+                  key={count}
+                  aria-label={`${count} ${count === 1 ? "runda" : "rundor"}`}
+                  aria-pressed={selected}
+                  disabled={youReady || starting}
+                  onClick={() => setRounds(count)}
+                  style={{
+                    flex: 1,
+                    padding: "12px 0",
+                    fontSize: 16,
+                    fontWeight: 800,
+                    borderRadius: 10,
+                    border: selected ? "1px solid #facc15" : "1px solid #2a3846",
+                    background: selected ? "#facc15" : "#18222b",
+                    color: selected ? "#111820" : "#e2e8f0",
+                    cursor: youReady || starting ? "default" : "pointer",
+                  }}
+                >
+                  {count}
+                </button>
+              );
+            })}
+          </div>
         </div>
         {mode === "teams" && (
           <div style={{ marginTop: 10, color: "#cbd5e1", fontSize: 14 }}>
@@ -241,9 +284,30 @@ export default function Lobby({
                     </div>
                     <div style={{ flex: 1 }}>
                       <div style={{ fontSize: 18, fontWeight: 700 }}>{player.name}</div>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: "#94a3b8" }}>
-                        {weapons[player.weapon].name}
-                      </div>
+                      <select
+                        aria-label={`Vapen för ${player.name}`}
+                        value={player.weapon}
+                        disabled={youReady || starting}
+                        onChange={(event) => setWeapon(player.id, event.target.value as WeaponId)}
+                        style={{
+                          marginTop: 6,
+                          width: "100%",
+                          maxWidth: 180,
+                          padding: "8px 10px",
+                          fontSize: 16,
+                          fontWeight: 700,
+                          borderRadius: 8,
+                          border: "1px solid #2a3846",
+                          background: "#111820",
+                          color: "#f8fafc",
+                        }}
+                      >
+                        {weaponIds.map((id) => (
+                          <option key={id} value={id}>
+                            {weapons[id].name}
+                          </option>
+                        ))}
+                      </select>
                     </div>
                     {!player.you && (
                       <button

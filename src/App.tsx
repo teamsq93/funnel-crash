@@ -10,13 +10,15 @@ export default function App() {
   const [online, setOnline] = useState(false);
   const [mode, setMode] = useState<MatchMode>("ffa");
   const [players, setPlayers] = useState<RosterPlayer[]>(() => roster.slice(0, 4));
+  const [rounds, setRounds] = useState(1);
 
   let screen = (
     <Lobby
       lineup={players}
-      onStart={(nextMode, nextPlayers) => {
+      onStart={(nextMode, nextPlayers, nextRounds) => {
         setMode(nextMode);
         setPlayers(nextPlayers);
+        setRounds(nextRounds);
         setInMatch(true);
       }}
       onOnline={() => setOnline(true)}
@@ -31,6 +33,7 @@ export default function App() {
         key={players.map((player) => player.id).join("-") + mode}
         mode={mode}
         players={players}
+        rounds={rounds}
         onExit={() => setInMatch(false)}
       />
     );
