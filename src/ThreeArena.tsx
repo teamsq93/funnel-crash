@@ -7,6 +7,7 @@ import { teamOf, teams, type MatchMode, type RosterPlayer, type WeaponId } from 
 type RoundOutcome = "win" | "loss" | "tie";
 
 const maxLife = 130;
+const drivePace = 0.7;
 
 type RoundSummary = {
   outcome: RoundOutcome;
@@ -902,37 +903,6 @@ export default function ThreeArena({
         roughness: 0.6,
       });
 
-      const body = new THREE.Mesh(
-        new THREE.BoxGeometry(0.81, 0.59, 2.1),
-        shellMaterial
-      );
-
-      body.position.y = 0.67;
-      body.castShadow = true;
-      truck.add(body);
-
-      const cab = new THREE.Mesh(
-        new THREE.BoxGeometry(0.63, 0.87, 0.85),
-        ownMaterial
-      );
-
-      cab.position.set(0, 1.4, -0.35);
-      cab.castShadow = true;
-      truck.add(cab);
-
-      const window = new THREE.Mesh(
-        new THREE.BoxGeometry(0.52, 0.45, 0.04),
-        new THREE.MeshStandardMaterial({
-          color: 0x8ddcff,
-          metalness: 0.4,
-          roughness: 0.15,
-          emissive: 0x123344,
-        })
-      );
-
-      window.position.set(0, 1.48, -0.79);
-      truck.add(window);
-
       const steel = new THREE.MeshStandardMaterial({
         color: 0xf4f7fb,
         metalness: 0.55,
@@ -948,6 +918,94 @@ export default function ThreeArena({
         metalness: 0.4,
         roughness: 0.32,
       });
+      const glass = new THREE.MeshStandardMaterial({
+        color: 0x8ddcff,
+        metalness: 0.4,
+        roughness: 0.15,
+        emissive: 0x123344,
+      });
+
+      let wheelX = 0.46;
+      let wheelZ = [-0.65, 0.68];
+
+      if (weapon === "wedge") {
+        const hull = new THREE.Mesh(new THREE.BoxGeometry(1.24, 0.4, 1.72), shellMaterial);
+        hull.position.y = 0.56;
+        hull.castShadow = true;
+        const cab = new THREE.Mesh(new THREE.BoxGeometry(0.82, 0.48, 0.5), ownMaterial);
+        cab.position.set(0, 0.98, -0.5);
+        cab.castShadow = true;
+        const window = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.26, 0.04), glass);
+        window.position.set(0, 1.05, -0.76);
+        truck.add(hull, cab, window);
+        wheelX = 0.64;
+        wheelZ = [-0.4, 0.46];
+      } else if (weapon === "axe") {
+        const hull = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.46, 1.5), shellMaterial);
+        hull.position.y = 0.6;
+        hull.castShadow = true;
+        const cab = new THREE.Mesh(new THREE.BoxGeometry(0.48, 1.12, 0.58), ownMaterial);
+        cab.position.set(0, 1.32, -0.42);
+        cab.castShadow = true;
+        const window = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.32, 0.04), glass);
+        window.position.set(0, 1.48, -0.72);
+        truck.add(hull, cab, window);
+        wheelX = 0.36;
+        wheelZ = [-0.48, 0.4];
+      } else if (weapon === "spinner") {
+        const hull = new THREE.Mesh(new THREE.CylinderGeometry(0.92, 0.92, 0.38, 28), shellMaterial);
+        hull.position.y = 0.58;
+        hull.castShadow = true;
+        const cab = new THREE.Mesh(new THREE.SphereGeometry(0.28, 16, 12), ownMaterial);
+        cab.position.set(0, 0.92, -0.28);
+        cab.castShadow = true;
+        const window = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.16, 0.04), glass);
+        window.position.set(0, 0.98, -0.54);
+        truck.add(hull, cab, window);
+        wheelX = 0.72;
+        wheelZ = [-0.38, 0.38];
+      } else if (weapon === "saw") {
+        const hull = new THREE.Mesh(new THREE.SphereGeometry(0.7, 22, 16), shellMaterial);
+        hull.scale.set(1.12, 0.58, 1.48);
+        hull.position.y = 0.68;
+        hull.castShadow = true;
+        const cab = new THREE.Mesh(new THREE.SphereGeometry(0.26, 14, 10), ownMaterial);
+        cab.position.set(0, 1.02, -0.55);
+        cab.castShadow = true;
+        const window = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.16, 0.04), glass);
+        window.position.set(0, 1.08, -0.8);
+        truck.add(hull, cab, window);
+        wheelX = 0.55;
+        wheelZ = [-0.55, 0.48];
+      } else if (weapon === "plow") {
+        const hull = new THREE.Mesh(new THREE.BoxGeometry(0.92, 0.34, 2.5), shellMaterial);
+        hull.position.y = 0.54;
+        hull.castShadow = true;
+        const cab = new THREE.Mesh(new THREE.BoxGeometry(0.74, 0.58, 0.48), ownMaterial);
+        cab.position.set(0, 0.98, -0.9);
+        cab.castShadow = true;
+        const window = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.28, 0.04), glass);
+        window.position.set(0, 1.08, -1.15);
+        truck.add(hull, cab, window);
+        wheelX = 0.5;
+        wheelZ = [-0.85, 0.72];
+      } else {
+        const hull = new THREE.Mesh(new THREE.BoxGeometry(0.66, 0.42, 0.82), shellMaterial);
+        hull.position.set(0, 0.58, -0.42);
+        hull.castShadow = true;
+        const nose = new THREE.Mesh(new THREE.ConeGeometry(0.36, 1.7, 6), shellMaterial);
+        nose.rotation.x = -Math.PI / 2;
+        nose.position.set(0, 0.6, 0.52);
+        nose.castShadow = true;
+        const cab = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.4, 0.38), ownMaterial);
+        cab.position.set(0, 0.98, -0.52);
+        cab.castShadow = true;
+        const window = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.2, 0.04), glass);
+        window.position.set(0, 1.04, -0.72);
+        truck.add(hull, nose, cab, window);
+        wheelX = 0.38;
+        wheelZ = [-0.48, 0.12];
+      }
 
       if (weapon === "wedge") {
         const scoop = new THREE.MeshStandardMaterial({
@@ -1087,7 +1145,7 @@ export default function ThreeArena({
       }
 
       for (const side of [-1, 1]) {
-        for (const axle of [-0.65, 0.68]) {
+        for (const axle of wheelZ) {
           const wheel = new THREE.Mesh(
             new THREE.CylinderGeometry(0.32, 0.32, 0.18, 20),
             darkMaterial
@@ -1096,7 +1154,7 @@ export default function ThreeArena({
           wheel.name = "wheel";
           wheel.userData.spin = 0;
           wheel.castShadow = false;
-          wheel.position.set(side * 0.46, 0.32, axle);
+          wheel.position.set(side * wheelX, 0.32, axle);
           truck.add(wheel);
         }
       }
@@ -2470,13 +2528,13 @@ export default function ThreeArena({
             remoteSpeed[i] = 0;
             remoteSteer[i] = 0;
           }
-          if (!falling[i] && remotePad.f) remoteSpeed[i] += 12 * dt;
-          if (!falling[i] && remotePad.b) remoteSpeed[i] -= 12 * dt;
+          if (!falling[i] && remotePad.f) remoteSpeed[i] += 12 * drivePace * dt;
+          if (!falling[i] && remotePad.b) remoteSpeed[i] -= 12 * drivePace * dt;
           remoteSpeed[i] *= Math.pow(0.993, dt * 60);
           remoteSpeed[i] = THREE.MathUtils.clamp(
             remoteSpeed[i],
-            tipped[i] ? -2 : -6,
-            tipped[i] ? 3 : 13
+            tipped[i] ? -2 * drivePace : -6 * drivePace,
+            tipped[i] ? 3 * drivePace : 13 * drivePace
           );
           const wantedSteer = (remotePad.l ? 1 : 0) - (remotePad.r ? 1 : 0);
           remoteSteer[i] += (wantedSteer - remoteSteer[i]) * Math.min(1, 22 * dt);
@@ -2558,13 +2616,13 @@ export default function ThreeArena({
 
         const dx = targetX - opponent.position.x;
         const dz = targetZ - opponent.position.z;
-        const cruise = tipped[i]
+        const cruise = (tipped[i]
           ? 2.4
           : radiusNow > joinRadius + 1 || radiusNow < dangerRadius
             ? 8
             : attacking
               ? 7.2
-              : 5.4;
+              : 5.4) * drivePace;
         const desired = Math.atan2(dx, dz);
         const error = Math.atan2(
           Math.sin(desired - heading[i]),
@@ -2636,14 +2694,14 @@ export default function ThreeArena({
         playerSpeed = 0;
         steerSmooth = 0;
       }
-      if (!falling[0] && keys.forward) playerSpeed += 12 * dt;
-      if (!falling[0] && keys.backward) playerSpeed -= 12 * dt;
+      if (!falling[0] && keys.forward) playerSpeed += 12 * drivePace * dt;
+      if (!falling[0] && keys.backward) playerSpeed -= 12 * drivePace * dt;
 
       playerSpeed *= Math.pow(0.993, dt * 60);
       playerSpeed = THREE.MathUtils.clamp(
         playerSpeed,
-        tipped[0] ? -2 : -6,
-        tipped[0] ? 3 : 13
+        tipped[0] ? -2 * drivePace : -6 * drivePace,
+        tipped[0] ? 3 * drivePace : 13 * drivePace
       );
 
       const wantedSteer =
