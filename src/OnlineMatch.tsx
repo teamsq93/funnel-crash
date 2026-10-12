@@ -97,7 +97,7 @@ export default function OnlineMatch({ onExit }: { onExit: () => void }) {
           sendInput: (pad) => {
             const packed = `${pad.f}${pad.b}${pad.l}${pad.r}${pad.x}`;
             const now = performance.now();
-            if (packed === lastPad.current && now - lastSent.current < 100) return;
+            if (packed === lastPad.current && now - lastSent.current < 50) return;
             lastPad.current = packed;
             lastSent.current = now;
             if (socket.readyState === WebSocket.OPEN) {

@@ -96,6 +96,7 @@ const httpServer = http.createServer(servePage);
 const server = new WebSocketServer({ server: httpServer });
 
 server.on("connection", (socket) => {
+  socket._socket?.setNoDelay(true);
   let room = null;
   let self = null;
 

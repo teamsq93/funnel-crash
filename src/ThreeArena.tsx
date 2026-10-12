@@ -6,6 +6,17 @@ import { teamOf, teams, type MatchMode, type RosterPlayer, type WeaponId } from 
 
 type RoundOutcome = "win" | "loss" | "tie";
 
+type TruckPose = {
+  x: number;
+  y: number;
+  z: number;
+  qx: number;
+  qy: number;
+  qz: number;
+  qw: number;
+  visible: boolean;
+};
+
 const maxLife = 130;
 const drivePace = 0.7;
 
@@ -2004,6 +2015,15 @@ export default function ThreeArena({
     let activeSummary: MatchSnap["summary"] = null;
     let guestRound = 1;
     let guestSummaryKey = "";
+    let guestPicture: MatchSnap | null = null;
+    let guestPrev: TruckPose[] | null = null;
+    let guestNext: TruckPose[] | null = null;
+    let guestPrevAt = 0;
+    let guestNextAt = 0;
+    const poseFrom = new THREE.Vector3();
+    const poseTo = new THREE.Vector3();
+    const quatFrom = new THREE.Quaternion();
+    const quatTo = new THREE.Quaternion();
     let shake = 0;
     const popups: { sprite: THREE.Sprite; life: number }[] = [];
     const audio = new AudioContext();
@@ -2248,12 +2268,46 @@ export default function ThreeArena({
       if (link && !link.host) {
         const picture = link.snap.current;
         if (picture) {
+          if (picture !== guestPicture) {
+            guestPicture = picture;
+            guestPrev = guestNext;
+            guestPrevAt = guestNextAt;
+            guestNext = picture.trucks.map((shot) => ({
+              x: shot.x,
+              y: shot.y,
+              z: shot.z,
+              qx: shot.qx,
+              qy: shot.qy,
+              qz: shot.qz,
+              qw: shot.qw,
+              visible: shot.visible,
+            }));
+            guestNextAt = performance.now();
+            if (!guestPrev) {
+              guestPrev = guestNext;
+              guestPrevAt = guestNextAt;
+            }
+          }
+          const span = Math.min(Math.max(guestNextAt - guestPrevAt, 16), 120);
+          const blend = Math.min(Math.max((performance.now() - guestNextAt) / span, 0), 1);
           for (let i = 0; i < picture.trucks.length; i++) {
             const truck = trucks[i];
             const shot = picture.trucks[i];
-            if (!truck || !shot) continue;
-            truck.position.set(shot.x, shot.y, shot.z);
-            truck.quaternion.set(shot.qx, shot.qy, shot.qz, shot.qw);
+            const from = guestPrev?.[i];
+            const to = guestNext?.[i];
+            if (!truck || !shot || !from || !to) continue;
+            if (from.visible !== to.visible) {
+              truck.position.set(to.x, to.y, to.z);
+              truck.quaternion.set(to.qx, to.qy, to.qz, to.qw);
+            } else {
+              poseFrom.set(from.x, from.y, from.z);
+              poseTo.set(to.x, to.y, to.z);
+              truck.position.lerpVectors(poseFrom, poseTo, blend);
+              quatFrom.set(from.qx, from.qy, from.qz, from.qw);
+              quatTo.set(to.qx, to.qy, to.qz, to.qw);
+              if (quatFrom.dot(quatTo) < 0) quatTo.set(-to.qx, -to.qy, -to.qz, -to.qw);
+              truck.quaternion.copy(quatFrom).slerp(quatTo, blend);
+            }
             truck.visible = shot.visible;
             weaponOn[i] = Boolean(shot.armed);
             poseWeapon(i);
@@ -2983,7 +3037,7 @@ export default function ThreeArena({
       }
 
       const publisher = onlineRef.current;
-      if (publisher?.host && performance.now() - lastSnapAt > 50) {
+      if (publisher?.host && performance.now() - lastSnapAt > 32) {
         lastSnapAt = performance.now();
         publisher.publish({
           timeLeft: Math.max(0, 120 - matchElapsed),
