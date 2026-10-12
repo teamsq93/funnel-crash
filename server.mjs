@@ -57,6 +57,9 @@ function pushLobby(room) {
 }
 
 const port = Number(process.env.PORT) || 2567;
+const canonicalHost = "funnel-crash-eu.onrender.com";
+const externalHost = process.env.RENDER_EXTERNAL_HOSTNAME ?? "";
+const redirectHost = externalHost !== "" && externalHost !== canonicalHost;
 const dist = path.join(path.dirname(fileURLToPath(import.meta.url)), "dist");
 const fileTypes = {
   ".html": "text/html; charset=utf-8",
@@ -71,6 +74,16 @@ const fileTypes = {
 };
 
 function servePage(req, res) {
+  if (redirectHost) {
+    const requestUrl = new URL(req.url ?? "/", "http://localhost");
+    res.writeHead(302, {
+      Location: `https://${canonicalHost}${requestUrl.pathname}${requestUrl.search}`,
+      "cache-control": "no-store",
+    });
+    res.end();
+    return;
+  }
+
   if (!fs.existsSync(dist)) {
     res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
     res.end("Rumservern är igång. Under utveckling öppnas spelet via npm run dev.");
@@ -96,6 +109,10 @@ const httpServer = http.createServer(servePage);
 const server = new WebSocketServer({ server: httpServer });
 
 server.on("connection", (socket) => {
+  if (redirectHost) {
+    socket.close();
+    return;
+  }
   socket._socket?.setNoDelay(true);
   let room = null;
   let self = null;

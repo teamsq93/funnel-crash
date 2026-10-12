@@ -13,6 +13,11 @@
     <title>funnel-crash</title>
   </head>
   <body>
+    <script>
+      if (location.hostname === "funnel-crash.onrender.com") {
+        location.replace("https://funnel-crash-eu.onrender.com" + location.pathname + location.search + location.hash);
+      }
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

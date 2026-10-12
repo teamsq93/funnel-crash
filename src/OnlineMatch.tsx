@@ -166,7 +166,7 @@ export default function OnlineMatch({ onExit }: { onExit: () => void }) {
         <div style={{ fontSize: 14, letterSpacing: 2, color: "#cbd5e1" }}>FUNNEL CRASH</div>
         <div style={{ fontSize: "clamp(28px, 9vw, 40px)", fontWeight: 800, marginTop: 6 }}>Online</div>
         <div style={{ marginTop: 8, color: "#cbd5e1" }}>
-          Värdens dator kör matchen. De andra skickar bara styrning. Öppna samma adress och skriv koden.
+          Värdens dator kör matchen. De andra skickar bara styrning. Alla öppnar funnel-crash-eu.onrender.com och skriver samma kod.
         </div>
 
         {phase === "pick" && (
@@ -200,6 +200,9 @@ export default function OnlineMatch({ onExit }: { onExit: () => void }) {
         {phase === "lobby" && (
           <>
             <div style={{ marginTop: 18, fontSize: 28, fontWeight: 800, letterSpacing: 4 }}>{roomCode}</div>
+            <div style={{ marginTop: 6, color: "#94a3b8" }}>
+              Koden gäller bara på funnel-crash-eu.onrender.com.
+            </div>
             <div style={{ marginTop: 16 }}>
               <div style={{ fontSize: 13, letterSpacing: 1, color: "#94a3b8", fontWeight: 700 }}>
                 RUNDOR
