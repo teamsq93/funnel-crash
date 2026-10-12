@@ -14,6 +14,7 @@ const roster = [
 ];
 
 const weaponIds = new Set(["wedge", "axe", "spinner", "saw", "plow", "spike"]);
+const rooms = new Map();
 
 function makeCode() {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -105,6 +106,7 @@ server.on("connection", (socket) => {
     } catch {
       return;
     }
+    try {
 
     if (message.type === "create" || message.type === "join") {
       const name = String(message.name ?? "Spelare").slice(0, 16).trim() || "Spelare";
@@ -197,6 +199,9 @@ server.on("connection", (socket) => {
 
     if (message.type === "snap" && room.phase === "match" && socket === room.host) {
       broadcast(room, { type: "snap", snap: message.snap }, socket);
+    }
+    } catch (error) {
+      console.error(error);
     }
   });
 
